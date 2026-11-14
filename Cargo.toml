@@ -1,0 +1,17 @@
+[package]
+name = "plugin"
+version = "0.1.0"
+edition = "2021"
+license = "MIT"
+authors = ["William Entriken"]
+description = "Zellij Compact Bar Next-Generation: Zellij, the session, the mode, ribbon tabs, and nano key hints on one row."
+repository = "https://github.com/fulldecent/zellij-compact-bar-ng"
+
+[lib]
+name = "plugin"
+path = "src/lib.rs"
+
+[dependencies]
+unicode-width = "0.2"
+zellij-tile = "0.45.1"
+zellij-utils = "0.45.1"

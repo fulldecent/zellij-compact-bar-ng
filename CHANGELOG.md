@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.2.0](https://github.com/fulldecent/zellij-compact-bar-ng/compare/v0.1.0...v0.2.0) (2026-11-16)
+
+
+### Features
+
+* paint tab ribbons from the theme ([454e7fd](https://github.com/fulldecent/zellij-compact-bar-ng/commit/454e7fd74449a66ca6557c66319f57370a1f810a))
+* paint tab ribbons from the theme ([b5a5353](https://github.com/fulldecent/zellij-compact-bar-ng/commit/b5a5353465b887b2f434aea2a47d332f7e3e9697))
+
 ## 0.1.0 (2026-11-14)
 
 

@@ -202,7 +202,7 @@ Out of scope:
 
 * No `Ctrl +` label and no Alt group on the hint block
 * No swap-layout indicator, tooltip, or nested-session hint from the built-in compact bar
-* No separate color scheme file. The ribbon fills stay the classic green and gray
+* No separate color scheme file
 * No format-string language or extra widgets
 * Layouts do not point at an HTTPS plugin URL
 

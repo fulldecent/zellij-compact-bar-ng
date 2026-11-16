@@ -54,6 +54,8 @@ pub fn chrome_from(style: &Style) -> Theme {
             light: tab_ink(colors.ribbon_unselected.background),
             plus_hover: tab_ink(colors.ribbon_unselected.emphasis_1),
             title: tab_ink(text.base),
+            selected_text: tab_ink(colors.ribbon_selected.base),
+            selected_fill: tab_ink(colors.ribbon_selected.background),
         },
         status: StatusChrome {
             bar: status_ink(text.background),

@@ -148,7 +148,7 @@ fn preferred_tab_width(tabs: &[TabSpec], chrome: &crate::tab_ribbon::Chrome) -> 
             budget += 7;
         }
     }
-    visible_width(&render_tab_strip(tabs, budget, chrome, false).0)
+    visible_width(&render_tab_strip(tabs, budget, chrome, None).0)
 }
 
 /// Widest hint row that fits in `remain`, leaving two spaces when that row fits beside them.
@@ -176,16 +176,7 @@ fn tabs_painted(
     if cols == 0 || tabs.is_empty() {
         return (String::new(), Vec::new());
     }
-    let (line, hits) = render_tab_strip(tabs, cols, &theme.tabs, false);
-    let plus_hovered = hover_col.is_some_and(|col| {
-        hits.iter()
-            .any(|hit| matches!(hit.action, TabAction::NewTab) && col >= hit.start && col < hit.end)
-    });
-    if plus_hovered {
-        render_tab_strip(tabs, cols, &theme.tabs, true)
-    } else {
-        (line, hits)
-    }
+    render_tab_strip(tabs, cols, &theme.tabs, hover_col)
 }
 
 fn prefix(state: &BarState<'_>, cols: usize) -> (String, usize) {

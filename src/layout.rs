@@ -328,6 +328,91 @@ impl Ink {
     }
 }
 
+fn is_chip_label(chunk: &Chunk) -> bool {
+    chunk.hit.is_some() && chunk.style == Style::Plain && chunk.text.chars().any(|ch| ch != ' ')
+}
+
+fn click_has_label(chunks: &[Chunk], click: Click) -> bool {
+    chunks.iter().any(|chunk| {
+        chunk.hit == Some(click)
+            && chunk.style == Style::Plain
+            && chunk.text.chars().any(|ch| ch != ' ')
+    })
+}
+
+/// Click of a labeled chip whose key chunk is `chunks[idx]`.
+fn labeled_chip_at(chunks: &[Chunk], idx: usize) -> Option<Click> {
+    let click = chunks.get(idx)?.hit?;
+    if !click_has_label(chunks, click) {
+        return None;
+    }
+    for chunk in chunks.iter().skip(idx + 1) {
+        if chunk.hit == Some(click)
+            && chunk.style == Style::Plain
+            && chunk.text.chars().any(|ch| ch != ' ')
+        {
+            return Some(click);
+        }
+        if chunk.hit.is_some() && chunk.hit != Some(click) {
+            return None;
+        }
+        if chunk.text.chars().any(|ch| ch != ' ')
+            && chunk.hit != Some(click)
+            && chunk.style != Style::Reverse
+        {
+            return None;
+        }
+    }
+    None
+}
+
+/// The two spaces after a labeled chip join the click targets. The first is
+/// the right side of this chip. The second is the left side of the next
+/// labeled chip, or this chip's right side when nothing labeled follows.
+/// A prefix space immediately before a labeled chip is that chip's left side.
+/// Key-only chips and letter combos such as `HJKL` keep their own hits.
+fn bind_chip_pads(chunks: &[Chunk]) -> Vec<Chunk> {
+    let mut spaced = Vec::with_capacity(chunks.len());
+    let mut i = 0;
+    while i < chunks.len() {
+        let separator = chunks
+            .get(i + 1)
+            .is_some_and(|chunk| chunk.hit.is_none() && chunk.text == "  ");
+        if separator && is_chip_label(&chunks[i]) {
+            let click = chunks[i].hit.expect("labeled chip");
+            spaced.push(chunks[i].clone());
+            spaced.push(Chunk::plain_hit(" ", click));
+            let next = labeled_chip_at(chunks, i + 2).unwrap_or(click);
+            spaced.push(Chunk::plain_hit(" ", next));
+            i += 2;
+            continue;
+        }
+        spaced.push(chunks[i].clone());
+        i += 1;
+    }
+
+    let mut out = Vec::with_capacity(spaced.len());
+    let mut i = 0;
+    while i < spaced.len() {
+        let peel = spaced[i].hit.is_none()
+            && spaced[i].text.ends_with(' ')
+            && spaced[i].text.chars().any(|ch| ch != ' ');
+        if peel {
+            if let Some(click) = labeled_chip_at(&spaced, i + 1) {
+                let mut prefix = spaced[i].clone();
+                prefix.text.pop();
+                out.push(prefix);
+                out.push(Chunk::plain_hit(" ", click));
+                i += 1;
+                continue;
+            }
+        }
+        out.push(spaced[i].clone());
+        i += 1;
+    }
+    out
+}
+
 fn hovered_click(chunks: &[Chunk], col: usize) -> Option<Click> {
     let mut x = 0;
     for chunk in chunks {
@@ -342,17 +427,25 @@ fn hovered_click(chunks: &[Chunk], col: usize) -> Option<Click> {
 
 fn paint(chunks: &[Chunk], chrome: &Chrome, hover: Option<usize>) -> String {
     let active = hover.and_then(|col| hovered_click(chunks, col));
+    // A labeled chip reverses the key and the name together. A key with no
+    // name still flips from reversed to normal.
+    let labeled = active.is_some_and(|click| click_has_label(chunks, click));
     let mut out = String::new();
     for chunk in chunks {
         out.push_str("\u{1b}[0m");
-        let invert = chunk.hit.is_some() && chunk.hit == active;
-        let params = match (chunk.style, invert) {
-            (Style::Plain, false) => format!("22;{};{}", chrome.light.fg(), chrome.bar.bg()),
-            (Style::Plain, true) => format!("22;{};{}", chrome.bar.fg(), chrome.light.bg()),
-            (Style::BoldOrange, false) => format!("22;{};{}", chrome.alt.fg(), chrome.bar.bg()),
-            (Style::BoldOrange, true) => format!("22;{};{}", chrome.bar.fg(), chrome.alt.bg()),
-            (Style::Reverse, false) => format!("22;{};{}", chrome.dark.fg(), chrome.light.bg()),
-            (Style::Reverse, true) => format!("22;{};{}", chrome.light.fg(), chrome.dark.bg()),
+        let same = chunk.hit.is_some() && chunk.hit == active;
+        let params = if same && labeled {
+            format!("22;{};{}", chrome.dark.fg(), chrome.light.bg())
+        } else {
+            let invert = same;
+            match (chunk.style, invert) {
+                (Style::Plain, false) => format!("22;{};{}", chrome.light.fg(), chrome.bar.bg()),
+                (Style::Plain, true) => format!("22;{};{}", chrome.bar.fg(), chrome.light.bg()),
+                (Style::BoldOrange, false) => format!("22;{};{}", chrome.alt.fg(), chrome.bar.bg()),
+                (Style::BoldOrange, true) => format!("22;{};{}", chrome.bar.fg(), chrome.alt.bg()),
+                (Style::Reverse, false) => format!("22;{};{}", chrome.dark.fg(), chrome.light.bg()),
+                (Style::Reverse, true) => format!("22;{};{}", chrome.light.fg(), chrome.dark.bg()),
+            }
         };
         out.push_str(&format!("\u{1b}[{params}m"));
         out.push_str(&chunk.text);
@@ -383,20 +476,6 @@ fn hits_of(chunks: &[Chunk]) -> Vec<Hit> {
         x += w;
     }
     hits
-}
-
-/// Context word for an active input mode, at the left of that mode's keys.
-fn mode_heading(mode: &str) -> Option<&'static str> {
-    match mode {
-        "pane" => Some("Pane"),
-        "tab" => Some("Tab"),
-        "resize" => Some("Resize"),
-        "move" => Some("Move"),
-        "scroll" => Some("Search"),
-        "session" => Some("Session"),
-        "tmux" => Some("Tmux"),
-        _ => None,
-    }
 }
 
 const FOCUS_HJKL: [Click; 4] = [
@@ -570,7 +649,7 @@ pub fn render_bar_with(
     chrome: &Chrome,
     hover: Option<usize>,
 ) -> (String, Vec<Hit>) {
-    let chunks = status_chunks(mode, cols);
+    let chunks = bind_chip_pads(&status_chunks(mode, cols));
     let hits = hits_of(&chunks);
     (paint(&chunks, chrome, hover), hits)
 }
@@ -587,27 +666,14 @@ fn status_chunks(mode: &str, cols: usize) -> Vec<Chunk> {
         return first_fit(&options, cols);
     }
 
-    if let Some(heading) = mode_heading(mode) {
-        let prefix = vec![Chunk::orange(heading), Chunk::plain(" ")];
-        let actions = mode_actions(mode);
-        let mut options = variants(prefix.clone(), &actions, true);
-        let mut compact = Vec::new();
-        if let Some(first) = actions.first() {
-            let mut row = prefix.clone();
-            row.extend(token_chunks(first));
-            compact.push(row);
-        }
-        compact.push(prefix);
-        compact.push(vec![Chunk::orange(heading)]);
-        match options.iter().position(|row| plain_text(row) == "...") {
-            Some(i) => {
-                for row in compact.into_iter().rev() {
-                    options.insert(i, row);
-                }
-            }
-            None => options.extend(compact),
-        }
-        return first_fit(&options, cols);
+    // The mode word is already on the left of the row. Debug of the mode, in
+    // uppercase: PANE, TAB, RESIZE, MOVE, SCROLL, SESSION, TMUX. Scroll's word
+    // is SCROLL. Session's word is SESSION. Do not repeat either name here.
+    if matches!(
+        mode,
+        "pane" | "tab" | "resize" | "move" | "scroll" | "session" | "tmux"
+    ) {
+        return first_fit(&variants(Vec::new(), &mode_actions(mode), true), cols);
     }
 
     let mut remain = cols;
@@ -636,5 +702,155 @@ fn status_chunks(mode: &str, cols: usize) -> Vec<Chunk> {
         let mut out = sep;
         out.extend(actions);
         out
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn visible(rendered: &str) -> String {
+        let mut out = String::new();
+        let mut chars = rendered.chars().peekable();
+        while let Some(ch) = chars.next() {
+            if ch == '\u{1b}' {
+                if chars.peek() == Some(&'[') {
+                    chars.next();
+                    for c in chars.by_ref() {
+                        if c.is_ascii_alphabetic() {
+                            break;
+                        }
+                    }
+                }
+                continue;
+            }
+            out.push(ch);
+        }
+        out
+    }
+
+    fn cell_sgr(rendered: &str) -> Vec<String> {
+        let mut cells = Vec::new();
+        let mut params = String::new();
+        let mut chars = rendered.chars().peekable();
+        while let Some(ch) = chars.next() {
+            if ch == '\u{1b}' {
+                if chars.peek() == Some(&'[') {
+                    chars.next();
+                    let mut seq = String::new();
+                    for c in chars.by_ref() {
+                        if c.is_ascii_alphabetic() {
+                            break;
+                        }
+                        seq.push(c);
+                    }
+                    if seq == "0" {
+                        params.clear();
+                    } else {
+                        params = seq;
+                    }
+                }
+                continue;
+            }
+            cells.push(params.clone());
+        }
+        cells
+    }
+
+    fn slice(text: &str, hit: &Hit) -> String {
+        text.chars()
+            .skip(hit.start)
+            .take(hit.end - hit.start)
+            .collect()
+    }
+
+    #[test]
+    fn labeled_chip_includes_the_side_spaces() {
+        let (line, hits) = render_bar_with("normal", 400, &Chrome::default(), None);
+        let text = visible(&line);
+        let resize = hits
+            .iter()
+            .find(|hit| hit.click == Click::Mode("resize"))
+            .expect("resize");
+        assert_eq!(slice(&text, resize), " ^N Resize ");
+        let tab = hits
+            .iter()
+            .find(|hit| hit.click == Click::Mode("tab"))
+            .expect("tab");
+        assert_eq!(tab.end, resize.start);
+    }
+
+    #[test]
+    fn hover_reverses_the_whole_labeled_chip() {
+        let chrome = Chrome {
+            bar: Ink::Bit(232),
+            ..Chrome::default()
+        };
+        let reverse = format!("22;{};{}", chrome.dark.fg(), chrome.light.bg());
+        let (idle, hits) = render_bar_with("normal", 400, &chrome, None);
+        let resize = hits
+            .iter()
+            .find(|hit| hit.click == Click::Mode("resize"))
+            .unwrap();
+        assert_ne!(cell_sgr(&idle)[resize.start + 4], reverse);
+        for col in resize.start..resize.end {
+            let cells = cell_sgr(&render_bar_with("normal", 400, &chrome, Some(col)).0);
+            assert!(
+                cells[resize.start..resize.end]
+                    .iter()
+                    .all(|cell| cell == &reverse),
+                "hover {col} left part of the chip unreversed"
+            );
+        }
+    }
+
+    #[test]
+    fn key_only_stays_the_key_and_turns_normal_on_hover() {
+        let chrome = Chrome {
+            bar: Ink::Bit(232),
+            ..Chrome::default()
+        };
+        let mut found = false;
+        for cols in 8..40 {
+            let (line, hits) = render_bar_with("normal", cols, &chrome, None);
+            let text = visible(&line);
+            if !text.contains("^G  ^P") || text.contains("Lock") {
+                continue;
+            }
+            let lock = hits
+                .iter()
+                .find(|hit| hit.click == Click::Mode("locked"))
+                .expect("lock");
+            assert_eq!(slice(&text, lock), "^G");
+            let normal = format!("22;{};{}", chrome.light.fg(), chrome.dark.bg());
+            let plain = format!("22;{};{}", chrome.light.fg(), chrome.bar.bg());
+            let cells = cell_sgr(&render_bar_with("normal", cols, &chrome, Some(lock.start)).0);
+            assert_eq!(cells[lock.start], normal);
+            assert_eq!(cells[lock.end], plain);
+            found = true;
+            break;
+        }
+        assert!(found, "no key-only row");
+    }
+
+    #[test]
+    fn letter_combo_hits_stay_one_cell() {
+        let (line, hits) = render_bar_with("pane", 400, &Chrome::default(), None);
+        let text = visible(&line);
+        assert!(text.contains("HJKL"), "{text}");
+        assert!(!text.starts_with("Pane"), "{text}");
+        let letters: Vec<_> = hits
+            .iter()
+            .filter(|hit| {
+                matches!(
+                    hit.click,
+                    Click::FocusLeft | Click::FocusDown | Click::FocusUp | Click::FocusRight
+                )
+            })
+            .collect();
+        assert_eq!(letters.len(), 4);
+        for hit in letters {
+            assert_eq!(hit.end - hit.start, 1);
+        }
     }
 }

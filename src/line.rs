@@ -382,10 +382,50 @@ mod tests {
         assert!(text.contains(" Zellij (demo) PANE "));
         let (hints, _) = render_bar_with("pane", 400, &Chrome::default(), None);
         let hint_text = strip_ansi(&hints);
-        assert!(hint_text.starts_with("Pane "));
+        assert!(hint_text.starts_with("N New"), "{hint_text}");
+        assert!(!hint_text.starts_with("Pane"), "{hint_text}");
         assert!(!hint_text.contains("Ctrl +"));
         assert!(text.ends_with(&hint_text));
         assert!(render_line(220, &state(InputMode::Locked, &tabs)).contains("38;5;201"));
+    }
+
+    #[test]
+    fn mode_word_stays_on_the_left() {
+        let tabs = tabs(1, 0);
+        for (mode, word, heading) in [
+            (InputMode::Pane, "PANE", "Pane"),
+            (InputMode::Tab, "TAB", "Tab"),
+            (InputMode::Resize, "RESIZE", "Resize"),
+            (InputMode::Move, "MOVE", "Move"),
+            (InputMode::Scroll, "SCROLL", "Search"),
+            (InputMode::Session, "SESSION", "Session"),
+            (InputMode::Tmux, "TMUX", "Tmux"),
+        ] {
+            let text = strip_ansi(&render_line(220, &state(mode, &tabs)));
+            assert!(
+                text.contains(&format!(" {word} ")),
+                "{mode:?} left word: {text}"
+            );
+            let hints =
+                strip_ansi(&render_bar_with(mode_name(mode), 400, &Chrome::default(), None).0);
+            assert!(
+                !hints.starts_with(heading),
+                "{mode:?} repeats {heading} in {hints}"
+            );
+            for cols in 1..=80 {
+                let narrow =
+                    strip_ansi(&render_bar_with(mode_name(mode), cols, &Chrome::default(), None).0);
+                assert!(
+                    !narrow.starts_with(heading),
+                    "{mode:?} at {cols} repeats {heading}: {narrow}"
+                );
+            }
+        }
+        let scroll = strip_ansi(&render_line(220, &state(InputMode::Scroll, &tabs)));
+        assert!(scroll.contains(" SCROLL "), "{scroll}");
+        assert!(!scroll.contains(" SEARCH "), "{scroll}");
+        let session = strip_ansi(&render_line(220, &state(InputMode::Session, &tabs)));
+        assert!(session.contains(" SESSION "), "{session}");
     }
 
     #[test]

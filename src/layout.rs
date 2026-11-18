@@ -366,11 +366,11 @@ fn labeled_chip_at(chunks: &[Chunk], idx: usize) -> Option<Click> {
     None
 }
 
-/// The two spaces after a labeled chip join the click targets. The first is
-/// the right side of this chip. The second is the left side of the next
-/// labeled chip, or this chip's right side when nothing labeled follows.
-/// A prefix space immediately before a labeled chip is that chip's left side.
-/// Key-only chips and letter combos such as `HJKL` keep their own hits.
+/// One space on each side of a labeled chip joins that chip. The first of the
+/// two spaces after the name is its right side. The second is the left side of
+/// the next labeled chip, and stays dead when the next control is not one
+/// (`HJKL`, a key with no name, or the end of the row). A prefix space
+/// immediately before a labeled chip is that chip's left side.
 fn bind_chip_pads(chunks: &[Chunk]) -> Vec<Chunk> {
     let mut spaced = Vec::with_capacity(chunks.len());
     let mut i = 0;
@@ -382,8 +382,10 @@ fn bind_chip_pads(chunks: &[Chunk]) -> Vec<Chunk> {
             let click = chunks[i].hit.expect("labeled chip");
             spaced.push(chunks[i].clone());
             spaced.push(Chunk::plain_hit(" ", click));
-            let next = labeled_chip_at(chunks, i + 2).unwrap_or(click);
-            spaced.push(Chunk::plain_hit(" ", next));
+            match labeled_chip_at(chunks, i + 2) {
+                Some(next) => spaced.push(Chunk::plain_hit(" ", next)),
+                None => spaced.push(Chunk::plain(" ")),
+            }
             i += 2;
             continue;
         }
@@ -643,13 +645,41 @@ fn mode_actions(mode: &str) -> Vec<Hint> {
 ///
 /// There is no `Ctrl +` label and no Alt group. The result is only as wide as
 /// the chosen row. Callers place that block. They do not stretch it.
+fn leading_pad_needed(chunks: &[Chunk]) -> bool {
+    labeled_chip_at(chunks, 0).is_some()
+}
+
+/// The compact row has no `Ctrl +` space to peel. The first labeled chip takes
+/// one column for its left side. That column comes out of the separator in
+/// front of the hint block, so the glyph does not move.
+fn fit_chunks(mode: &str, cols: usize) -> Vec<Chunk> {
+    if cols == 0 {
+        return Vec::new();
+    }
+    let fitted = bind_chip_pads(&status_chunks(mode, cols));
+    if !leading_pad_needed(&fitted) || cols == 1 {
+        return fitted;
+    }
+    let mut reserved = bind_chip_pads(&status_chunks(mode, cols - 1));
+    if leading_pad_needed(&reserved) {
+        let click = labeled_chip_at(&reserved, 0).expect("labeled chip");
+        reserved.insert(0, Chunk::plain_hit(" ", click));
+        if width(&reserved) <= cols {
+            return reserved;
+        }
+    } else if !reserved.is_empty() && width(&reserved) <= cols {
+        return reserved;
+    }
+    fitted
+}
+
 pub fn render_bar_with(
     mode: &str,
     cols: usize,
     chrome: &Chrome,
     hover: Option<usize>,
 ) -> (String, Vec<Hit>) {
-    let chunks = bind_chip_pads(&status_chunks(mode, cols));
+    let chunks = fit_chunks(mode, cols);
     let hits = hits_of(&chunks);
     (paint(&chunks, chrome, hover), hits)
 }
@@ -801,7 +831,125 @@ mod tests {
                     .all(|cell| cell == &reverse),
                 "hover {col} left part of the chip unreversed"
             );
+            if resize.start > 0 {
+                assert_ne!(cells[resize.start - 1], reverse);
+            }
+            if resize.end < cells.len() {
+                assert_ne!(cells[resize.end], reverse);
+            }
         }
+    }
+
+    fn side_pads(slice: &str) -> (usize, usize) {
+        let lead = slice.chars().take_while(|ch| *ch == ' ').count();
+        let trail = slice.chars().rev().take_while(|ch| *ch == ' ').count();
+        (lead, trail)
+    }
+
+    #[test]
+    fn every_labeled_chip_has_one_space_on_each_side() {
+        let chrome = Chrome {
+            bar: Ink::Bit(232),
+            ..Chrome::default()
+        };
+        let reverse = format!("22;{};{}", chrome.dark.fg(), chrome.light.bg());
+        for mode in [
+            "normal",
+            "locked",
+            "pane",
+            "tab",
+            "resize",
+            "move",
+            "scroll",
+            "session",
+            "tmux",
+            "search",
+            "enter_search",
+            "rename_pane",
+            "rename_tab",
+        ] {
+            let (line, hits) = render_bar_with(mode, 400, &chrome, None);
+            let text = visible(&line);
+            assert!(text.chars().count() <= 400, "{mode} {text}");
+            for hit in &hits {
+                let body = slice(&text, hit);
+                if body.contains(' ') {
+                    assert_eq!(side_pads(&body), (1, 1), "{mode} {body} in {text}");
+                } else {
+                    assert_eq!(side_pads(&body), (0, 0), "{mode} {body}");
+                }
+            }
+            let labeled: Vec<_> = hits
+                .iter()
+                .filter(|hit| slice(&text, hit).contains(' '))
+                .copied()
+                .collect();
+            for hit in labeled {
+                let cells = cell_sgr(&render_bar_with(mode, 400, &chrome, Some(hit.start)).0);
+                assert!(
+                    cells[hit.start..hit.end]
+                        .iter()
+                        .all(|cell| cell == &reverse),
+                    "{mode} hover did not light the whole chip"
+                );
+                if hit.start > 0 {
+                    assert_ne!(
+                        cells[hit.start - 1],
+                        reverse,
+                        "{mode} lit the left neighbor"
+                    );
+                }
+                if hit.end < cells.len() {
+                    assert_ne!(cells[hit.end], reverse, "{mode} lit the right neighbor");
+                }
+            }
+        }
+
+        let (pane, pane_hits) = render_bar_with("pane", 400, &Chrome::default(), None);
+        let pane_text = visible(&pane);
+        let new = pane_hits
+            .iter()
+            .find(|hit| hit.click == Click::NewPane)
+            .unwrap();
+        assert_eq!(slice(&pane_text, new), " N New ");
+        assert!(pane_hits
+            .iter()
+            .all(|hit| hit.end <= new.end || hit.start > new.end));
+
+        let (tab, tab_hits) = render_bar_with("tab", 400, &Chrome::default(), None);
+        let tab_text = visible(&tab);
+        let enter = tab_hits
+            .iter()
+            .find(|hit| hit.click == Click::SelectPane)
+            .unwrap();
+        assert_eq!(slice(&tab_text, enter), " ENTER Select Pane ");
+        assert!(
+            tab_hits
+                .iter()
+                .all(|hit| hit.end <= enter.end || hit.start > enter.end),
+            "a second space after Select Pane is inside a hit"
+        );
+        assert_eq!(tab_text.chars().nth(enter.end), Some(' '));
+
+        let (scroll, scroll_hits) = render_bar_with("scroll", 400, &Chrome::default(), None);
+        let scroll_text = visible(&scroll);
+        let search = scroll_hits
+            .iter()
+            .find(|hit| hit.click == Click::EnterSearch)
+            .unwrap();
+        assert_eq!(slice(&scroll_text, search), " S Enter Search Term ");
+        assert!(scroll_hits
+            .iter()
+            .all(|hit| hit.end <= search.end || hit.start > search.end));
+
+        let (session, session_hits) = render_bar_with("session", 400, &Chrome::default(), None);
+        let session_text = visible(&session);
+        let detach = session_hits
+            .iter()
+            .find(|hit| hit.click == Click::Detach)
+            .unwrap();
+        assert_eq!(slice(&session_text, detach), " D Detach ");
+        assert!(session_hits.iter().any(|hit| hit.start == detach.end));
     }
 
     #[test]

@@ -128,8 +128,10 @@ Clone the project and build. On Linux and macOS:
 ```sh
 git clone https://github.com/fulldecent/zellij-compact-bar-ng.git
 cd zellij-compact-bar-ng
-export PATH="$(dirname "$(rustup which cargo)"):$PATH"
-export DYLD_LIBRARY_PATH="$(cd "$(dirname "$(rustup which cargo)")/../lib" && pwd)" # macOS only; omit on Linux
+rustup show
+cargo_bin=$(rustup which cargo)
+export PATH="$(dirname "$cargo_bin"):$PATH"
+export DYLD_LIBRARY_PATH="$(cd "$(dirname "$cargo_bin")/../lib" && pwd)" # macOS only; omit on Linux
 cargo check --locked
 cargo build --locked
 ```
@@ -137,7 +139,12 @@ cargo build --locked
 In PowerShell:
 
 ```powershell
-$bin = Split-Path (rustup which cargo)
+git clone https://github.com/fulldecent/zellij-compact-bar-ng.git
+Set-Location zellij-compact-bar-ng
+rustup show
+$cargo = rustup which cargo
+if (-not $cargo) { exit 1 }
+$bin = Split-Path $cargo
 $env:PATH = "$bin;$env:PATH"
 cargo check --locked
 cargo build --locked
@@ -152,8 +159,10 @@ zellij --layout layout/dev.kdl
 ### Testing
 
 ```sh
-export PATH="$(dirname "$(rustup which cargo)"):$PATH"
-export DYLD_LIBRARY_PATH="$(cd "$(dirname "$(rustup which cargo)")/../lib" && pwd)" # macOS only; omit on Linux
+rustup show
+cargo_bin=$(rustup which cargo)
+export PATH="$(dirname "$cargo_bin"):$PATH"
+export DYLD_LIBRARY_PATH="$(cd "$(dirname "$cargo_bin")/../lib" && pwd)" # macOS only; omit on Linux
 cargo test --locked --target "$(rustc -vV | sed -n 's/^host: //p')"
 cargo fmt --all -- --check
 cargo clippy --all-targets --locked -- -D warnings
@@ -165,8 +174,10 @@ cargo build --release --locked
 The host is [Zellij Plugin Snapshot](https://github.com/fulldecent/zellij-plugin-snapshot) 0.2.2. Install that published crate once. `cargo install` compiles it and puts `zellij-plugin-snapshot` on `PATH`. `[dependencies]` and `[dev-dependencies]` link a library into the plugin wasm or into `cargo test`. This host is a command, so those fields leave it uninstalled.
 
 ```sh
-export PATH="$(dirname "$(rustup which cargo)"):$PATH"
-export DYLD_LIBRARY_PATH="$(cd "$(dirname "$(rustup which cargo)")/../lib" && pwd)" # macOS only; omit on Linux
+rustup show
+cargo_bin=$(rustup which cargo)
+export PATH="$(dirname "$cargo_bin"):$PATH"
+export DYLD_LIBRARY_PATH="$(cd "$(dirname "$cargo_bin")/../lib" && pwd)" # macOS only; omit on Linux
 cargo install zellij-plugin-snapshot --version 0.2.2 --locked
 sh tests/snapshot.sh
 ```

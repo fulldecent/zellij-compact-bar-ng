@@ -172,6 +172,11 @@ fn status_span(mode: &str, remain: usize, theme: &Theme) -> (usize, usize) {
         let (ansi, _) = render_bar_with(mode, remain - 2, &theme.status, None);
         let text = strip_ansi(&ansi);
         let width = text.width();
+        // A help title can fill the wider budget and leave the buttons out.
+        // The narrower row still starts with a space, so the gap stays one.
+        if width > 0 && text.starts_with(' ') && width < remain {
+            return (width, 1);
+        }
         if width > 0 && !text.starts_with(' ') {
             return (width, 2);
         }
@@ -332,6 +337,21 @@ mod tests {
             theme: Theme::default(),
             hover_col: None,
         }
+    }
+
+    #[test]
+    fn rename_controls_stay_when_one_more_column_is_available() {
+        let theme = Theme::default();
+        let at_16 = status_span("rename_pane", 16, &theme);
+        let at_17 = status_span("rename_pane", 17, &theme);
+        assert!(at_16.0 > 0, "{at_16:?}");
+        assert!(
+            at_17.0 > 0,
+            "17 columns dropped the rename controls: {at_17:?}"
+        );
+        assert_eq!(at_17.1, 1, "gap: {at_17:?}");
+        let text = strip_ansi(&render_bar_with("rename_pane", at_17.0, &theme.status, None).0);
+        assert!(text.contains("ESC"), "{text}");
     }
 
     #[test]

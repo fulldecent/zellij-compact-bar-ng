@@ -19,6 +19,8 @@
 
 ## Unreleased
 
+- A labeled chip reverses the key and the name together on hover. Exactly one space on each side is part of that target, including the space in front of the first chip. A key with no name is reversed, and it turns normal on hover. Letter combos such as `HJKL` still click one glyph.
+- The hint block does not repeat the mode name. `PANE`, `TAB`, `RESIZE`, `MOVE`, `SCROLL`, and `SESSION` stay on the left. Scroll's word is `SCROLL`. Session's word is `SESSION`.
 - One row: Zellij, the session name, the compact-bar mode, ribbon tabs, two spaces, and the status hints.
 - The hint block has no `Ctrl +` label and no Alt group. It is as wide as the hints it shows.
 - Tab names stay whole. The hint block shortens first.

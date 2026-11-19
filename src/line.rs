@@ -151,15 +151,33 @@ fn preferred_tab_width(tabs: &[TabSpec], chrome: &crate::tab_ribbon::Chrome) -> 
     visible_width(&render_tab_strip(tabs, budget, chrome, None).0)
 }
 
-/// Widest hint row that fits in `remain`, leaving two spaces when that row fits beside them.
+/// Widest hint row that fits in `remain`.
+///
+/// A labeled hint already includes the first chip's left pad, so one more
+/// space separates it from the tabs. A key-only hint has no pad, so two
+/// spaces separate it. Either way the glyph has two spaces in front of it.
 fn status_span(mode: &str, remain: usize, theme: &Theme) -> (usize, usize) {
     if remain == 0 {
         return (0, 0);
     }
+    if remain > 1 {
+        let (ansi, _) = render_bar_with(mode, remain - 1, &theme.status, None);
+        let text = strip_ansi(&ansi);
+        let width = text.width();
+        if width > 0 && text.starts_with(' ') && width < remain {
+            return (width, 1);
+        }
+    }
     if remain > 2 {
         let (ansi, _) = render_bar_with(mode, remain - 2, &theme.status, None);
-        let width = visible_width(&ansi);
-        if width > 0 {
+        let text = strip_ansi(&ansi);
+        let width = text.width();
+        // A help title can fill the wider budget and leave the buttons out.
+        // The narrower row still starts with a space, so the gap stays one.
+        if width > 0 && text.starts_with(' ') && width < remain {
+            return (width, 1);
+        }
+        if width > 0 && !text.starts_with(' ') {
             return (width, 2);
         }
     }
@@ -295,7 +313,7 @@ fn mode_name(mode: InputMode) -> &'static str {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::layout::Chrome;
+    use crate::layout::{Chrome, Click};
 
     fn tabs(n: usize, active: usize) -> Vec<TabSpec> {
         (0..n)
@@ -322,6 +340,21 @@ mod tests {
     }
 
     #[test]
+    fn rename_controls_stay_when_one_more_column_is_available() {
+        let theme = Theme::default();
+        let at_16 = status_span("rename_pane", 16, &theme);
+        let at_17 = status_span("rename_pane", 17, &theme);
+        assert!(at_16.0 > 0, "{at_16:?}");
+        assert!(
+            at_17.0 > 0,
+            "17 columns dropped the rename controls: {at_17:?}"
+        );
+        assert_eq!(at_17.1, 1, "gap: {at_17:?}");
+        let text = strip_ansi(&render_bar_with("rename_pane", at_17.0, &theme.status, None).0);
+        assert!(text.contains("ESC"), "{text}");
+    }
+
+    #[test]
     fn wide_row_is_zellij_session_mode_tabs_then_hints() {
         let tabs = tabs(3, 1);
         let row = state(InputMode::Normal, &tabs);
@@ -339,14 +372,16 @@ mod tests {
 
         let (hints, _) = render_bar_with("normal", 400, &Chrome::default(), None);
         let hint_text = strip_ansi(&hints);
-        assert!(hint_text.starts_with("^G Lock"));
+        assert!(hint_text.starts_with(" ^G Lock"), "{hint_text}");
         assert!(text.ends_with(&hint_text));
         let at = text.len() - hint_text.len();
         assert!(
-            text[..at].ends_with("  "),
-            "two spaces sit in front of the hints: {:?}",
+            text[..at].ends_with(' '),
+            "one separator sits in front of the hint pad: {:?}",
             &text[at.saturating_sub(8)..]
         );
+        let glyph = text.rfind("^G").expect("^G");
+        assert_eq!(&text[glyph - 2..glyph], "  ", "{text}");
         assert!(line.contains("38;5;154"));
     }
 
@@ -382,10 +417,141 @@ mod tests {
         assert!(text.contains(" Zellij (demo) PANE "));
         let (hints, _) = render_bar_with("pane", 400, &Chrome::default(), None);
         let hint_text = strip_ansi(&hints);
-        assert!(hint_text.starts_with("Pane "));
+        assert!(hint_text.starts_with(" N New"), "{hint_text}");
+        assert!(!hint_text.starts_with("Pane"), "{hint_text}");
         assert!(!hint_text.contains("Ctrl +"));
         assert!(text.ends_with(&hint_text));
         assert!(render_line(220, &state(InputMode::Locked, &tabs)).contains("38;5;201"));
+    }
+
+    #[test]
+    fn mode_word_stays_on_the_left() {
+        let tabs = tabs(1, 0);
+        for (mode, word, heading) in [
+            (InputMode::Pane, "PANE", "Pane"),
+            (InputMode::Tab, "TAB", "Tab"),
+            (InputMode::Resize, "RESIZE", "Resize"),
+            (InputMode::Move, "MOVE", "Move"),
+            (InputMode::Scroll, "SCROLL", "Search"),
+            (InputMode::Session, "SESSION", "Session"),
+            (InputMode::Tmux, "TMUX", "Tmux"),
+        ] {
+            let text = strip_ansi(&render_line(220, &state(mode, &tabs)));
+            assert!(
+                text.contains(&format!(" {word} ")),
+                "{mode:?} left word: {text}"
+            );
+            let hints =
+                strip_ansi(&render_bar_with(mode_name(mode), 400, &Chrome::default(), None).0);
+            assert!(
+                !hints.starts_with(heading),
+                "{mode:?} repeats {heading} in {hints}"
+            );
+            for cols in 1..=80 {
+                let narrow =
+                    strip_ansi(&render_bar_with(mode_name(mode), cols, &Chrome::default(), None).0);
+                assert!(
+                    !narrow.starts_with(heading),
+                    "{mode:?} at {cols} repeats {heading}: {narrow}"
+                );
+            }
+        }
+        let scroll = strip_ansi(&render_line(220, &state(InputMode::Scroll, &tabs)));
+        assert!(scroll.contains(" SCROLL "), "{scroll}");
+        assert!(!scroll.contains(" SEARCH "), "{scroll}");
+        let session = strip_ansi(&render_line(220, &state(InputMode::Session, &tabs)));
+        assert!(session.contains(" SESSION "), "{session}");
+    }
+
+    fn chip_slice(text: &str, hit: &BarHit) -> String {
+        text.chars()
+            .skip(hit.start)
+            .take(hit.end - hit.start)
+            .collect()
+    }
+
+    #[test]
+    fn reviewed_buttons_have_one_pad_on_each_side() {
+        let tabs = tabs(1, 0);
+        let cases = [
+            (InputMode::Normal, Click::Mode("locked"), "^G Lock"),
+            (InputMode::Pane, Click::NewPane, "N New"),
+            (InputMode::Tab, Click::SelectPane, "ENTER Select Pane"),
+            (InputMode::Scroll, Click::EnterSearch, "S Enter Search Term"),
+            (InputMode::Session, Click::Detach, "D Detach"),
+        ];
+        for (mode, click, body) in cases {
+            let row = state(mode, &tabs);
+            let text = strip_ansi(&render_line(220, &row));
+            let hits = render_hits(220, &row);
+            let hit = hits
+                .iter()
+                .find(|hit| hit.action == Action::Status(click))
+                .unwrap_or_else(|| panic!("{mode:?} missing {body} in {text}"));
+            assert_eq!(
+                chip_slice(&text, hit),
+                format!(" {body} "),
+                "{mode:?} {text}"
+            );
+        }
+
+        let pane = state(InputMode::Pane, &tabs);
+        let pane_hits = render_hits(220, &pane);
+        let new = pane_hits
+            .iter()
+            .find(|hit| hit.action == Action::Status(Click::NewPane))
+            .unwrap();
+        assert!(pane_hits
+            .iter()
+            .all(|hit| hit.end <= new.end || hit.start > new.end));
+
+        let mut normal = state(InputMode::Normal, &tabs);
+        let plain = strip_ansi(&render_line(220, &normal));
+        let glyph = plain
+            .chars()
+            .collect::<Vec<_>>()
+            .windows(2)
+            .position(|pair| *pair == ['^', 'G'])
+            .unwrap();
+        normal.hover_col = Some(glyph - 1);
+        let hovered = render_line(220, &normal);
+        let cells = hover_cells(&hovered);
+        let reverse = "38;5;16;48;5;245";
+        assert!(cells[glyph - 1].contains(reverse), "{}", cells[glyph - 1]);
+        assert!(cells[glyph].contains(reverse), "{}", cells[glyph]);
+        assert!(
+            !cells[glyph - 2].contains(reverse),
+            "separator lit up: {}",
+            cells[glyph - 2]
+        );
+    }
+
+    fn hover_cells(rendered: &str) -> Vec<String> {
+        let mut cells = Vec::new();
+        let mut params = String::new();
+        let mut chars = rendered.chars().peekable();
+        while let Some(ch) = chars.next() {
+            if ch == '\u{1b}' {
+                if chars.peek() == Some(&'[') {
+                    chars.next();
+                    let mut seq = String::new();
+                    for c in chars.by_ref() {
+                        if c.is_ascii_alphabetic() {
+                            break;
+                        }
+                        seq.push(c);
+                    }
+                    if seq == "0" {
+                        params.clear();
+                    } else {
+                        params = seq;
+                    }
+                }
+                continue;
+            }
+            cells.push(params.clone());
+        }
+        cells
     }
 
     #[test]

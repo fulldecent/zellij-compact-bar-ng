@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.2.1](https://github.com/fulldecent/zellij-compact-bar-ng/compare/v0.2.0...v0.2.1) (2026-11-19)
+
+
+### Bug Fixes
+
+* install the toolchain before selecting cargo ([c003fb6](https://github.com/fulldecent/zellij-compact-bar-ng/commit/c003fb6086764eaa5e84c56b192e3c02563779e0))
+* keep one space on each side of a labeled chip ([3d14751](https://github.com/fulldecent/zellij-compact-bar-ng/commit/3d147518f9bc89e8dda8276b9490804fefad94df))
+* keep rename controls when the title fills the wider budget ([d1129b3](https://github.com/fulldecent/zellij-compact-bar-ng/commit/d1129b3c0a334a770f097cfca6e861f666d239e4))
+* keep the space before ESC when the help title is hidden ([4abe802](https://github.com/fulldecent/zellij-compact-bar-ng/commit/4abe802ef067e61e1051fb31b90deedf02606f90))
+* reverse labeled chips and drop the repeated mode name ([ff4555f](https://github.com/fulldecent/zellij-compact-bar-ng/commit/ff4555f7107ff5555033920c2fc3ea76be873b42))
+* stop the snapshot script when rustup which fails ([72dc688](https://github.com/fulldecent/zellij-compact-bar-ng/commit/72dc68830f132cbd2700df517517f92af844e1aa))
+
 ## [0.2.0](https://github.com/fulldecent/zellij-compact-bar-ng/compare/v0.1.0...v0.2.0) (2026-11-16)
 
 
